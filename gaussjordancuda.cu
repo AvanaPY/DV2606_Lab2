@@ -1,12 +1,18 @@
 /***************************************************************************
  *
- * Sequential version of Gauss-Jordan row reduction
+ * GPU version of Gauss-Jordan row reduction
+ * Written by
+ *  Emil Karlström, DVAMI19h
+ *  Samuel Jonsson, DVAMI19h
  *
  ***************************************************************************/
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
 
 #define MAX_SIZE 4096
+#define MAX_BLOCK_SIZE 1024
 
 typedef double matrix[MAX_SIZE][MAX_SIZE];
 
@@ -29,7 +35,7 @@ int
 main(int argc, char** argv)
 {
     printf("Gauss Jordan\n");
-    int i, timestart, timeend, iter;
+    // int i, timestart, timeend, iter;
 
     Init_Default();		/* Init default values	*/
     Read_Options(argc, argv);	/* Read arguments	*/
@@ -37,11 +43,104 @@ main(int argc, char** argv)
     work();
     if (PRINT == 1)
         Print_Matrix();
+
+    cudaDeviceSynchronize();
+}
+
+__global__ void kernel_normalize_row(double* cuda_A, double* cuda_B, double* cuda_Y, int N, int k)
+{
+    int index = k + 1 + blockIdx.x * blockDim.x + threadIdx.x;
+    if(index < N)
+    {
+        cuda_A[k * N + index] = cuda_A[k * N + index] / cuda_A[k * N + k];
+    }
+}
+
+__global__ void kernel_norm_pivot(double* cuda_A, double* cuda_B, double* cuda_Y, int N, int k)
+{
+    cuda_Y[k] = cuda_B[k] / cuda_A[k * N + k];
+    cuda_A[k * N + k] = 1;
+}
+
+__global__ void kernel_elimination(double* cuda_A, double* cuda_B, double* cuda_Y, int N, int k)
+{
+    int index = k + 1 + blockIdx.x * blockDim.x + threadIdx.x;
+    if(index < N)
+    {
+        int j;
+        for(j = k + 1; j < N; j++)
+        {
+            cuda_A[index * N + j] -= cuda_A[index * N + k] * cuda_A[k * N + j];
+        }
+        cuda_B[index] -= cuda_A[index * N + k] * cuda_Y[k];
+        cuda_A[index * N + k] = 0.0;
+    }
+}
+
+__global__ void kernel_gj_step(double* cuda_A, double* cuda_B, double* cuda_Y, int N, int k)
+{
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int j;
+    if(index < k)
+    {
+        for(j = k + 1; j < N; j++)
+        {
+            cuda_A[index * N + j] -= cuda_A[index * N + k] * cuda_A[k * N + j];
+        }
+        cuda_Y[index] -= cuda_A[index * N + k] * cuda_Y[k];
+        cuda_A[index * N + k] = 0.0;
+    }
 }
 
 void
 work(void)
 {
+    /* Allocate and copy data to GPU */
+    double *cuda_A, *cuda_B, *cuda_Y;
+    cudaMalloc((void**)&cuda_A, sizeof(double) * N * N);
+    cudaMalloc((void**)&cuda_B, sizeof(double) * N);
+    cudaMalloc((void**)&cuda_Y, sizeof(double) * N);
+
+    for(int k = 0; k < N; k++)
+        cudaMemcpy(cuda_A + N * k, A[k], sizeof(double) * N, cudaMemcpyHostToDevice);
+    
+    cudaMemcpy(cuda_B, b, sizeof(double) * N, cudaMemcpyHostToDevice);
+    cudaMemcpy(cuda_Y, y, sizeof(double) * N, cudaMemcpyHostToDevice);
+
+    /* GJ elimination */
+    int BLOCKS = max(1, N / MAX_BLOCK_SIZE);
+    int i,j,k;
+    for(k = 0; k < N; k++)
+    {
+        /* Normalize */
+
+        kernel_normalize_row<<<BLOCKS, MAX_BLOCK_SIZE>>>(cuda_A, cuda_B, cuda_Y, N, k);
+        kernel_norm_pivot<<<1, 1>>>(cuda_A, cuda_B, cuda_Y, N, k);
+        
+        /* Standard elimination */
+        kernel_elimination<<<BLOCKS, MAX_BLOCK_SIZE>>>(cuda_A, cuda_B, cuda_Y, N, k);
+        
+        /* Gauss Jordan step thingy*/
+        kernel_gj_step<<<BLOCKS, MAX_BLOCK_SIZE>>>(cuda_A, cuda_B, cuda_Y, N, k);
+    }
+
+    /* Copy from GPU to RAM */
+
+    for(int k = 0; k < N; k++)
+        cudaMemcpy(A[k], cuda_A + N * k, sizeof(double) * N, cudaMemcpyDeviceToHost);
+    cudaMemcpy(b, cuda_B, sizeof(double) * N, cudaMemcpyDeviceToHost);
+    cudaMemcpy(y, cuda_Y, sizeof(double) * N, cudaMemcpyDeviceToHost);
+
+
+    /* Print if we got any cool cuda errors */
+
+    cudaError_t e = cudaGetLastError();
+    const char* e_s = cudaGetErrorString(e);
+
+    /* Free GPU memory; cuda is freeeeeeeeee~~~~~~~~ */
+    cudaFree(cuda_A);
+    cudaFree(cuda_B);
+    cudaFree(cuda_Y);
 }
 
 void
@@ -98,6 +197,12 @@ Print_Matrix()
             printf(" %5.2f,", A[i][j]);
         printf("]\n");
     }
+    
+    printf("Vector b:\n[");
+    for (j = 0; j < N; j++)
+        printf(" %5.2f,", b[j]);
+    printf("]\n");
+
     printf("Vector y:\n[");
     for (j = 0; j < N; j++)
         printf(" %5.2f,", y[j]);
@@ -164,4 +269,5 @@ Read_Options(int argc, char** argv)
                 printf("HELP: try %s -u \n\n", prog);
                 break;
             }
+    return 0;
 }

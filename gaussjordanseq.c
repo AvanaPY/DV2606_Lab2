@@ -119,6 +119,12 @@ Print_Matrix()
             printf(" %5.2f,", A[i][j]);
         printf("]\n");
     }
+    
+    printf("Vector b:\n[");
+    for (j = 0; j < N; j++)
+        printf(" %5.2f,", b[j]);
+    printf("]\n");
+    
     printf("Vector y:\n[");
     for (j = 0; j < N; j++)
         printf(" %5.2f,", y[j]);

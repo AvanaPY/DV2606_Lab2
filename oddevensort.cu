@@ -1,10 +1,18 @@
+/***************************************************************************
+ *
+ * GPU version of Odd Even Sorting
+ * Written by
+ *  Emil Karlström, DVAMI19h
+ *  Samuel Jonsson, DVAMI19h
+ *
+ ***************************************************************************/
+
 #include <iostream>
 #include <chrono>
 #include <math.h>
 
 #define MAXNUM 65564
 #define MAX_THREADS_PER_BLOCK 1024
-
 
 void print_array_status(int* v, int vsize);
 void print_sort_status(int* v, int vsize);
