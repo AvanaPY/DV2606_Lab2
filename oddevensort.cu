@@ -11,10 +11,15 @@ void print_sort_status(int* v, int vsize);
 void init_array(int* v, int vsize);
 void odd_even_sort(int* v, int vsize);
 
+/*
+    This is our kernel function, it computes one iteration
+    of the odd-even sorting algorithm
+*/
 __global__ void vector_odd_even_sort(int* cuda_v, int vsize, int i)
 {
     int j, tmp;
 
+    /* Compute which pair this thread shall sort */
     j = i % 2 + (blockIdx.x * blockDim.x + threadIdx.x) * 2;
     if(j < vsize - 1)
     {
@@ -25,6 +30,7 @@ __global__ void vector_odd_even_sort(int* cuda_v, int vsize, int i)
             cuda_v[j+1] = tmp;
         }
     }
+    /* Synch the threads in this block */
     __syncthreads();
 }
 
@@ -41,6 +47,9 @@ int main(void)
     return 0;
 }
 
+/*
+    Main API function
+*/
 void odd_even_sort(int* v, int vsize)
 {
     // Step 1: Copy to GPU unit
@@ -51,10 +60,14 @@ void odd_even_sort(int* v, int vsize)
 
     // Sort
 
+    /* Compute how many blocks we have to use */
     int BLOCKS = max(1, vsize / MAX_THREADS_PER_BLOCK);
 
-    printf("Sorting with dims(%d,%d)\n", BLOCKS, MAX_THREADS_PER_BLOCK);
-
+    /* 
+        This is our outer loop in the odd-even sorting algorithm
+        It synchronises the GPU blocks which are distributed 
+        to compute the sorting of one iteration of the odd-even sorting algorithm
+    */
     for(int i = 1; i <= vsize; i++)
         vector_odd_even_sort<<<BLOCKS, MAX_THREADS_PER_BLOCK>>>(cuda_v, vsize, i);
 
@@ -65,6 +78,7 @@ void odd_even_sort(int* v, int vsize)
     cudaFree(cuda_v);
 }
 
+/* Print the array values */
 void print_array_status(int* v, int vsize)
 {
     for(int i = 0; i < vsize; i++)
@@ -72,6 +86,7 @@ void print_array_status(int* v, int vsize)
     printf("\n");
 }
 
+/* Print the array's sort status */
 void print_sort_status(int* v, int vsize)
 {
     int sorted = 1;
@@ -80,6 +95,7 @@ void print_sort_status(int* v, int vsize)
     std::cout << "The input is sorted?: " << (sorted == 1 ? "True" : "False") << std::endl;
 }
 
+/* (Psuedo)-randomly initialise the array */
 void init_array(int* v, int vsize)
 {
     for(int i = 0; i < vsize; i++)
