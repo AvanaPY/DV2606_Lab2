@@ -10,9 +10,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <time.h>
 
 #define MAX_SIZE 4096
-#define MAX_BLOCK_SIZE 1024
+int MAX_BLOCK_SIZE;
 
 typedef double matrix[MAX_SIZE][MAX_SIZE];
 
@@ -34,13 +35,19 @@ int Read_Options(int, char**);
 int
 main(int argc, char** argv)
 {
-    printf("Gauss Jordan\n");
-    // int i, timestart, timeend, iter;
+    printf("Gauss Jordan GPU\n");
+    int i, iter;
+    clock_t timestart, timeend;
 
     Init_Default();		/* Init default values	*/
     Read_Options(argc, argv);	/* Read arguments	*/
     Init_Matrix();		/* Init the matrix	*/
+
+    timestart = clock();
     work();
+    timeend = clock();
+    printf("Seconds used for computing: %f\n", (double)(timeend - timestart) / CLOCKS_PER_SEC);
+    
     if (PRINT == 1)
         Print_Matrix();
 
@@ -64,29 +71,37 @@ __global__ void kernel_norm_pivot(double* cuda_A, double* cuda_B, double* cuda_Y
 
 __global__ void kernel_elimination(double* cuda_A, double* cuda_B, double* cuda_Y, int N, int k)
 {
+    int x = k + 1 + blockIdx.x * blockDim.x + threadIdx.x;
+    int y = k + 1 + blockIdx.y * blockDim.y + threadIdx.y;
+
+    // Boundary guard
+    if((y < N) && (x < N))
+        cuda_A[y * N + x] -= cuda_A[y * N + k] * cuda_A[k * N + x];
+}
+
+__global__ void kernel_eval_b(double* cuda_A, double* cuda_B, double* cuda_Y, int N, int k)
+{
     int index = k + 1 + blockIdx.x * blockDim.x + threadIdx.x;
     if(index < N)
     {
-        int j;
-        for(j = k + 1; j < N; j++)
-        {
-            cuda_A[index * N + j] -= cuda_A[index * N + k] * cuda_A[k * N + j];
-        }
         cuda_B[index] -= cuda_A[index * N + k] * cuda_Y[k];
         cuda_A[index * N + k] = 0.0;
     }
 }
-
 __global__ void kernel_gj_step(double* cuda_A, double* cuda_B, double* cuda_Y, int N, int k)
 {
+    int x = k + 1 + blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    // Boundary guard
+    if((y < k) && (x < N))
+        cuda_A[y * N + x] -= cuda_A[y * N + k] * cuda_A[k * N + x];
+}
+__global__ void kernel_gj_step2(double* cuda_A, double* cuda_B, double* cuda_Y, int N, int k)
+{
     int index = blockIdx.x * blockDim.x + threadIdx.x;
-    int j;
     if(index < k)
     {
-        for(j = k + 1; j < N; j++)
-        {
-            cuda_A[index * N + j] -= cuda_A[index * N + k] * cuda_A[k * N + j];
-        }
         cuda_Y[index] -= cuda_A[index * N + k] * cuda_Y[k];
         cuda_A[index * N + k] = 0.0;
     }
@@ -100,7 +115,6 @@ work(void)
     cudaMalloc((void**)&cuda_A, sizeof(double) * N * N);
     cudaMalloc((void**)&cuda_B, sizeof(double) * N);
     cudaMalloc((void**)&cuda_Y, sizeof(double) * N);
-
     for(int k = 0; k < N; k++)
         cudaMemcpy(cuda_A + N * k, A[k], sizeof(double) * N, cudaMemcpyHostToDevice);
     
@@ -108,20 +122,34 @@ work(void)
     cudaMemcpy(cuda_Y, y, sizeof(double) * N, cudaMemcpyHostToDevice);
 
     /* GJ elimination */
-    int BLOCKS = max(1, N / MAX_BLOCK_SIZE);
-    int i,j,k;
+    int block_size = MAX_BLOCK_SIZE * MAX_BLOCK_SIZE;
+    int BLOCKS = max(1, N / block_size);
+    
+    dim3 blockDims(MAX_BLOCK_SIZE, MAX_BLOCK_SIZE);
+    dim3 gridDims(
+                    (int)ceil((float)N/(float)blockDims.x),
+                    (int)ceil((float)N/(float)blockDims.y)
+                    );
+
+    printf("Running with (%d, %d)\n", BLOCKS, block_size);
+
+    printf("Running with elimination dims of <%d %d, <%d %d>>\n", gridDims.x, gridDims.y, blockDims.x, blockDims.y);
+    int k;
     for(k = 0; k < N; k++)
     {
         /* Normalize */
-
-        kernel_normalize_row<<<BLOCKS, MAX_BLOCK_SIZE>>>(cuda_A, cuda_B, cuda_Y, N, k);
+        kernel_normalize_row<<<BLOCKS, block_size>>>(cuda_A, cuda_B, cuda_Y, N, k);
         kernel_norm_pivot<<<1, 1>>>(cuda_A, cuda_B, cuda_Y, N, k);
         
         /* Standard elimination */
-        kernel_elimination<<<BLOCKS, MAX_BLOCK_SIZE>>>(cuda_A, cuda_B, cuda_Y, N, k);
-        
-        /* Gauss Jordan step thingy*/
-        kernel_gj_step<<<BLOCKS, MAX_BLOCK_SIZE>>>(cuda_A, cuda_B, cuda_Y, N, k);
+        kernel_elimination<<<gridDims, blockDims>>>(cuda_A, cuda_B, cuda_Y, N, k);
+        kernel_eval_b<<<BLOCKS, block_size>>>(cuda_A, cuda_B, cuda_Y, N, k);
+
+        /* Gauss Jordan step thingy and zeroing numbers before*/
+        kernel_gj_step<<<gridDims, blockDims>>>(cuda_A, cuda_B, cuda_Y, N, k);
+        kernel_gj_step2<<<BLOCKS, block_size>>>(cuda_A, cuda_B, cuda_Y, N, k);
+
+        cudaDeviceSynchronize();
     }
 
     /* Copy from GPU to RAM */
@@ -130,7 +158,6 @@ work(void)
         cudaMemcpy(A[k], cuda_A + N * k, sizeof(double) * N, cudaMemcpyDeviceToHost);
     cudaMemcpy(b, cuda_B, sizeof(double) * N, cudaMemcpyDeviceToHost);
     cudaMemcpy(y, cuda_Y, sizeof(double) * N, cudaMemcpyDeviceToHost);
-
 
     /* Print if we got any cool cuda errors */
 
@@ -217,6 +244,8 @@ Init_Default()
     Init = "fast";
     maxnum = 15.0;
     PRINT = 0;
+
+    MAX_BLOCK_SIZE = 256;
 }
 
 int
@@ -263,6 +292,10 @@ Read_Options(int argc, char** argv)
             case 'P':
                 --argc;
                 PRINT = atoi(*++argv);
+                break;
+            case 't':
+                --argc;
+                MAX_BLOCK_SIZE = atoi(*++argv);
                 break;
             default:
                 printf("%s: ignored option: -%s\n", prog, *argv);

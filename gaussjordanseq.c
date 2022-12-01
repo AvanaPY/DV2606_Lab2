@@ -5,6 +5,8 @@
  ***************************************************************************/
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
 
 #define MAX_SIZE 4096
 
@@ -29,12 +31,18 @@ int
 main(int argc, char** argv)
 {
     printf("Gauss Jordan\n");
-    int i, timestart, timeend, iter;
+    int i, iter;
+    clock_t timestart, timeend;
 
     Init_Default();		/* Init default values	*/
     Read_Options(argc, argv);	/* Read arguments	*/
     Init_Matrix();		/* Init the matrix	*/
+
+    timestart = clock();
     work();
+    timeend = clock();
+    printf("Seconds used for computing: %f\n", (double)(timeend - timestart) / CLOCKS_PER_SEC);
+    
     if (PRINT == 1)
         Print_Matrix();
 }
