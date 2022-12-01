@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
+#include <assert.h>
 
 #define MAX_SIZE 4096
 int MAX_BLOCK_SIZE;
@@ -25,33 +26,51 @@ matrix	A;		/* matrix A		*/
 double	b[MAX_SIZE];	/* vector b             */
 double	y[MAX_SIZE];	/* vector y             */
 
+/* Verifying that the computed matrix is correct */
+int VERIFY;
+matrix verify_A;
+double verify_b[MAX_SIZE];
+double verify_y[MAX_SIZE];
+
 /* forward declarations */
 void work(void);
 void Init_Matrix(void);
 void Print_Matrix(void);
 void Init_Default(void);
+void verify_result(void);
 int Read_Options(int, char**);
 
 int
 main(int argc, char** argv)
 {
     printf("Gauss Jordan GPU\n");
-    int i, iter;
     clock_t timestart, timeend;
 
     Init_Default();		/* Init default values	*/
     Read_Options(argc, argv);	/* Read arguments	*/
     Init_Matrix();		/* Init the matrix	*/
 
+    /* Prepare verification */
+    memcpy(verify_A, A, sizeof(double) * MAX_SIZE * MAX_SIZE);
+    memcpy(verify_b, b, sizeof(double) * MAX_SIZE);
+    memcpy(verify_y, y, sizeof(double) * MAX_SIZE);
+
     timestart = clock();
     work();
+    cudaDeviceSynchronize();
     timeend = clock();
     printf("Seconds used for computing: %f\n", (double)(timeend - timestart) / CLOCKS_PER_SEC);
     
     if (PRINT == 1)
         Print_Matrix();
 
-    cudaDeviceSynchronize();
+    if(VERIFY == 1)
+    {
+        timestart = clock();
+        verify_result();
+        timeend = clock();
+        printf("Seconds used for verification: %f\n", (double)(timeend - timestart) / CLOCKS_PER_SEC);
+    }
 }
 
 __global__ void kernel_normalize_row(double* cuda_A, double* cuda_B, double* cuda_Y, int N, int k)
@@ -125,15 +144,18 @@ work(void)
     int block_size = MAX_BLOCK_SIZE * MAX_BLOCK_SIZE;
     int BLOCKS = max(1, N / block_size);
     
-    dim3 blockDims(MAX_BLOCK_SIZE, MAX_BLOCK_SIZE);
+    dim3 blockDims(
+        MAX_BLOCK_SIZE, 
+        MAX_BLOCK_SIZE
+    );
     dim3 gridDims(
-                    (int)ceil((float)N/(float)blockDims.x),
-                    (int)ceil((float)N/(float)blockDims.y)
-                    );
+        (int)ceil((float)N/(float)blockDims.x),
+        (int)ceil((float)N/(float)blockDims.y)
+    );
 
-    printf("Running with (%d, %d)\n", BLOCKS, block_size);
+    clock_t start, end;
 
-    printf("Running with elimination dims of <%d %d, <%d %d>>\n", gridDims.x, gridDims.y, blockDims.x, blockDims.y);
+    start = clock();
     int k;
     for(k = 0; k < N; k++)
     {
@@ -148,9 +170,10 @@ work(void)
         /* Gauss Jordan step thingy and zeroing numbers before*/
         kernel_gj_step<<<gridDims, blockDims>>>(cuda_A, cuda_B, cuda_Y, N, k);
         kernel_gj_step2<<<BLOCKS, block_size>>>(cuda_A, cuda_B, cuda_Y, N, k);
-
-        cudaDeviceSynchronize();
     }
+    end = clock();
+    double difference = (double)(end - start) / CLOCKS_PER_SEC;
+    printf("Total raw computing time: %f\n", difference);
 
     /* Copy from GPU to RAM */
 
@@ -175,10 +198,11 @@ Init_Matrix()
 {
     int i, j;
 
-    printf("\nsize      = %dx%d ", N, N);
-    printf("\nmaxnum    = %d \n", maxnum);
-    printf("Init	  = %s \n", Init);
-    printf("Initializing matrix...");
+    printf("\nsize       = %dx%d", N, N);
+    printf("\nBlock size = <%d,%d>", MAX_BLOCK_SIZE, MAX_BLOCK_SIZE);
+    printf("\nmaxnum     = %d", maxnum);
+    printf("\nInit	   = %s", Init);
+    printf("\nInitializing matrix...");
 
     if (strcmp(Init, "rand") == 0) {
         for (i = 0; i < N; i++) {
@@ -244,8 +268,9 @@ Init_Default()
     Init = "fast";
     maxnum = 15.0;
     PRINT = 0;
+    VERIFY = 0;
 
-    MAX_BLOCK_SIZE = 256;
+    MAX_BLOCK_SIZE = 32;
 }
 
 int
@@ -297,10 +322,98 @@ Read_Options(int argc, char** argv)
                 --argc;
                 MAX_BLOCK_SIZE = atoi(*++argv);
                 break;
+            case 'v':
+                --argc;
+                VERIFY = atoi(*++argv);
+                break;
             default:
                 printf("%s: ignored option: -%s\n", prog, *argv);
                 printf("HELP: try %s -u \n\n", prog);
                 break;
             }
     return 0;
+}
+
+double _round_to_decimals(double value, int decimals)
+{
+    int fac = pow(10, decimals - 1);
+    return round((value * decimals) / decimals);
+}
+
+void verify_result()
+{
+    printf("Verifying result...\n");
+    /* Gaussian elimination algorithm, Algo 8.4 from Grama */
+    int k, j, i;
+    for (k = 0; k < N; k++) { /* Outer loop */
+        for (j = k + 1; j < N; j++)
+            verify_A[k][j] = verify_A[k][j] / verify_A[k][k]; /* Division step */
+        verify_y[k] = verify_b[k] / verify_A[k][k];
+        verify_A[k][k] = 1.0;
+        for (i = k + 1; i < N; i++) {
+            for (j = k + 1; j < N; j++)
+                verify_A[i][j] = verify_A[i][j] - verify_A[i][k] * verify_A[k][j]; /* Elimination step */
+            verify_b[i] = verify_b[i] - verify_A[i][k] * verify_y[k];
+            verify_A[i][k] = 0.0;
+        }
+        for (i = 0; i < k; i++) {
+            for (j = k + 1; j < N; j++)
+                verify_A[i][j] = verify_A[i][j] - verify_A[i][k] * verify_A[k][j]; /* Additional Elimination for Gauss-Jordan */
+            verify_y[i] = verify_y[i] - verify_A[i][k] * verify_y[k];
+            verify_A[i][k] = 0.0;
+        }
+    }
+    printf("\tComputed correct matrix.\n");
+
+    /* Print original matrix */
+
+    if(PRINT == 1)
+    {
+        printf("Matrix A:\n");
+        for (i = 0; i < N; i++) {
+            printf("[");
+            for (j = 0; j < N; j++)
+                printf(" %5.15f,", A[i][j]);
+            printf("]\n");
+        }
+
+        printf("\n");
+        for (i = 0; i < N; i++) {
+            printf("[");
+            for (j = 0; j < N; j++)
+                printf(" %5.15f,", verify_A[i][j]);
+            printf("]\n");
+        }
+        
+        printf("bs:\n[");
+        for (j = 0; j < N; j++)
+            printf(" %5.15f,", b[j]);
+        printf("]\n[");
+        for (j = 0; j < N; j++)
+            printf(" %5.15f,", verify_b[j]);
+        printf("]\n");
+
+        printf("ys:\n[");
+        for (j = 0; j < N; j++)
+            printf(" %5.15f,", y[j]);
+        printf("]\n[");
+        for (j = 0; j < N; j++)
+            printf(" %5.15f,", verify_y[j]);
+        printf("]\n");
+        printf("\n\n");
+    }
+
+    /* Print verify matrix */
+
+    /* Verify they are still the same */
+    int decimals = 10;
+    for(int i = 0; i < N; i++)
+    {
+        for(int j = 0; j < N; j++)
+            assert(_round_to_decimals(verify_A[i][j], decimals) == _round_to_decimals(A[i][j], decimals) && "verify_A not equal to A");
+        assert(_round_to_decimals(verify_b[i], decimals) == _round_to_decimals(b[i], decimals) && "verify_b not equal to b");
+        assert(_round_to_decimals(verify_y[i], decimals) == _round_to_decimals(y[i], decimals) && "verify_y not equal to y");
+    }
+
+    printf("\tPassed verification to %d decimals\n", decimals);
 }
