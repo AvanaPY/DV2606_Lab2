@@ -134,11 +134,10 @@ work(void)
     cudaMalloc((void**)&cuda_A, sizeof(double) * N * N);
     cudaMalloc((void**)&cuda_B, sizeof(double) * N);
     cudaMalloc((void**)&cuda_Y, sizeof(double) * N);
+
     for(int k = 0; k < N; k++)
         cudaMemcpy(cuda_A + N * k, A[k], sizeof(double) * N, cudaMemcpyHostToDevice);
-    
     cudaMemcpy(cuda_B, b, sizeof(double) * N, cudaMemcpyHostToDevice);
-    cudaMemcpy(cuda_Y, y, sizeof(double) * N, cudaMemcpyHostToDevice);
 
     /* GJ elimination */
     int block_size = MAX_BLOCK_SIZE * MAX_BLOCK_SIZE;
@@ -160,26 +159,33 @@ work(void)
     for(k = 0; k < N; k++)
     {
         /* Normalize */
-        kernel_normalize_row<<<BLOCKS, block_size>>>(cuda_A, cuda_B, cuda_Y, N, k);
-        kernel_norm_pivot<<<1, 1>>>(cuda_A, cuda_B, cuda_Y, N, k);
+        kernel_normalize_row<<<BLOCKS, block_size>>>(cuda_A, cuda_B, cuda_Y, N, k); cudaDeviceSynchronize();
+        kernel_norm_pivot<<<1, 1>>>(cuda_A, cuda_B, cuda_Y, N, k);                  cudaDeviceSynchronize();
         
         /* Standard elimination */
-        kernel_elimination<<<gridDims, blockDims>>>(cuda_A, cuda_B, cuda_Y, N, k);
-        kernel_eval_b<<<BLOCKS, block_size>>>(cuda_A, cuda_B, cuda_Y, N, k);
+        kernel_elimination<<<gridDims, blockDims>>>(cuda_A, cuda_B, cuda_Y, N, k);  cudaDeviceSynchronize();
+        kernel_eval_b<<<BLOCKS, block_size>>>(cuda_A, cuda_B, cuda_Y, N, k);        cudaDeviceSynchronize();
 
         /* Gauss Jordan step thingy and zeroing numbers before*/
-        kernel_gj_step<<<gridDims, blockDims>>>(cuda_A, cuda_B, cuda_Y, N, k);
-        kernel_gj_step2<<<BLOCKS, block_size>>>(cuda_A, cuda_B, cuda_Y, N, k);
+        kernel_gj_step<<<gridDims, blockDims>>>(cuda_A, cuda_B, cuda_Y, N, k);      cudaDeviceSynchronize();
+        kernel_gj_step2<<<BLOCKS, block_size>>>(cuda_A, cuda_B, cuda_Y, N, k);      cudaDeviceSynchronize();
     }
+    cudaDeviceSynchronize();
     end = clock();
     double difference = (double)(end - start) / CLOCKS_PER_SEC;
     printf("Total raw computing time: %f\n", difference);
 
     /* Copy from GPU to RAM */
 
-    for(int k = 0; k < N; k++)
-        cudaMemcpy(A[k], cuda_A + N * k, sizeof(double) * N, cudaMemcpyDeviceToHost);
-    cudaMemcpy(b, cuda_B, sizeof(double) * N, cudaMemcpyDeviceToHost);
+    /* 
+        Copying A and B back to the Host is optional. We are not necessarily interested in A and B, but only the vector Y.
+        A's final state is predictable as it's just a matrix of 0s with a diagonal of 1s, and the result of B is not of interest.
+        Skipping copying A and B improves performance slightly.
+    */ 
+
+    // for(int k = 0; k < N; k++)
+    //     cudaMemcpy(A[k], cuda_A + N * k, sizeof(double) * N, cudaMemcpyDeviceToHost);
+    // cudaMemcpy(b, cuda_B, sizeof(double) * N, cudaMemcpyDeviceToHost);
     cudaMemcpy(y, cuda_Y, sizeof(double) * N, cudaMemcpyDeviceToHost);
 
     /* Print if we got any cool cuda errors */

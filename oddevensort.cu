@@ -23,14 +23,12 @@ void odd_even_sort(int* v, int vsize);
     This is our kernel function, it computes one iteration
     of the odd-even sorting algorithm
 */
-__global__ void vector_odd_even_sort(int* cuda_v, int vsize, int i)
+__global__ void vector_odd_even_sort(int* cuda_v, int vsize, int i, int BLOCKS, int BLOCK_SIZE)
 {
     int j, tmp;
 
-    /* Compute which pair this thread shall sort */
-    j = i % 2 + (blockIdx.x * blockDim.x + threadIdx.x) * 2;
-    if(j < vsize - 1)
-    {
+    /* Compute which pairs this thread shall sort */
+    for(j = i % 2 + (blockIdx.x * blockDim.x + threadIdx.x) * 2; j < vsize - 1; j += BLOCKS * BLOCK_SIZE * 2){
         if(cuda_v[j] > cuda_v[j + 1])
         {
             tmp = cuda_v[j];
@@ -38,19 +36,18 @@ __global__ void vector_odd_even_sort(int* cuda_v, int vsize, int i)
             cuda_v[j+1] = tmp;
         }
     }
-    /* Synch the threads in this block */
-    __syncthreads();
 }
 
 int main(void)
 {
-    constexpr unsigned int size = 2<<19;
+    constexpr unsigned int size = 2<<10;
     int v[size];
     init_array(v, size);
 
     odd_even_sort(v, size);
     
     print_sort_status(v, size);
+    // print_array_status(v, size);
     cudaDeviceSynchronize();
     return 0;
 }
@@ -69,7 +66,8 @@ void odd_even_sort(int* v, int vsize)
     // Sort
 
     /* Compute how many blocks we have to use */
-    int BLOCKS = max(1, vsize / MAX_THREADS_PER_BLOCK);
+    int THREADS_PER_BLOCK = 32;
+    int BLOCKS = 32;
 
     /* 
         This is our outer loop in the odd-even sorting algorithm
@@ -77,7 +75,7 @@ void odd_even_sort(int* v, int vsize)
         to compute the sorting of one iteration of the odd-even sorting algorithm
     */
     for(int i = 1; i <= vsize; i++)
-        vector_odd_even_sort<<<BLOCKS, MAX_THREADS_PER_BLOCK>>>(cuda_v, vsize, i);
+        vector_odd_even_sort<<<BLOCKS, MAX_THREADS_PER_BLOCK>>>(cuda_v, vsize, i, BLOCKS, THREADS_PER_BLOCK);
 
     // Copy back to host memory
     cudaMemcpy(v, cuda_v, sizeof(int) * vsize, cudaMemcpyDeviceToHost);
