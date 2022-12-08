@@ -23,7 +23,7 @@ To compile all C/C++ programs run `make compile_c`. Please note that this requir
 
 `gaussjordancuda.a` is the CUDA Gauss-Jordan implementation. See below for new flags you can use when running the program. 
 
-By default this uses a matrix of 2048x2048 and block dimensions of 32x32, i.e 1024 threads per block.
+By default this uses a matrix of 2048x2048 and block dimensions of 32x32, i.e 1024 threads per block and as many blocks as needed.
 
 `oddevensortcu.a` is the CUDA odd-even-sort implementation that uses multi-kernel calls. 
 
