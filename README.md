@@ -21,15 +21,25 @@ To compile all C/C++ programs run `make compile_c`. Please note that this requir
 
 # Files
 
-`gaussjordancuda.a` is the CUDA Gauss-Jordan implementation. See below for new flags you can use when running the program.
+`gaussjordancuda.a` is the CUDA Gauss-Jordan implementation. See below for new flags you can use when running the program. 
 
-`oddevensortcu.a` is the CUDA odd-even-sort implementation that uses multi-kernel calls.
+By default this uses a matrix of 2048x2048 and block dimensions of 32x32, i.e 1024 threads per block.
 
-`oddevensort_one_block_block.a` is the CUDA odd-even-sort implementation that uses a single kernel call and divides the array into chunks and maps each thread to a chunk.
+`oddevensortcu.a` is the CUDA odd-even-sort implementation that uses multi-kernel calls. 
 
-`oddevensort_one_block_stride.a` is the CUDA odd-even-sort implementation that uses a single kernel call and divides using strides rather than chunks to map threads to pairs.
+By default this uses a list of 2^19 items.
 
-# Featured new flags in Gauss-Jordan CUDA
+`oddevensort_one_block_block.a` is the CUDA odd-even-sort implementation that uses a single kernel call and divides the array into chunks and maps each thread to a chunk. 
+
+By default this uses a list of 100 000 items as 2^19 items takes too long to compute.
+
+`oddevensort_one_block_stride.a` is the CUDA odd-even-sort implementation that uses a single kernel call and divides using strides rather than chunks to map threads to pairs. 
+
+By default this uses a list of 100 000 items as 2^19 items takes a long time compute.
+
+# New features in Gauss-Jordan CUDA
+
+## Flags 
 
 * `-t` controlls the amount of threads to use for each dimension of a 2D block of threads. The total amount of threads per block is the square of this number, i.e `-t 4` would use a 4x4 blocks, i.e 16 threads per block.
 
@@ -37,3 +47,7 @@ To compile all C/C++ programs run `make compile_c`. Please note that this requir
 
     * `-v 1` means to compute verification and `-v 0` is not to. 
     * The verification only compares the resulting `y` vector. 
+
+## Macros
+
+* `gaussjordancuda.cu` now contains a macro named `__PROFILE__z` by default. By renaming it to `__PROFILE__` (without the `z`) one can profile the different stages of the program using the `chrono` library.
