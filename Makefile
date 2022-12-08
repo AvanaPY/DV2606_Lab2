@@ -24,7 +24,7 @@ clean:
 zip:
 	@rm -rf assignment
 	@mkdir assignment
-	@cp *.cu Makefile README.md assignment
+	@cp *.cu *.pdf Makefile README.md assignment
 	@zip assignment.zip assignment/*
 	@rm -rf assignment
 
