@@ -13,7 +13,9 @@
 #include <time.h>
 #include <assert.h>
 
-#define __PROFILE__
+/*  If you would like to profile the program
+    rename this macro to __PROFILE__ by removing the "z" */
+#define __PROFILE__z
 #define MAX_SIZE 4096
 
 typedef double matrix[MAX_SIZE][MAX_SIZE];
