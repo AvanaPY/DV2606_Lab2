@@ -41,9 +41,9 @@ By default this uses a list of 100 000 items as 2^19 items takes a long time com
 
 ## Flags 
 
-* `-t` controlls the amount of threads to use for each dimension of a 2D block of threads. The total amount of threads per block is the square of this number, i.e `-t 4` would use a 4x4 blocks, i.e 16 threads per block.
+* `-t` controlls the amount of threads to use for each dimension of a 2D block of threads. The total amount of threads per block is the square of this number, i.e `-t 4` would use a 4x4 blocks, i.e 16 threads per block. Defaults to `32`.
 
-* `-v` controlls whether or not to perform verification of the computed result. This uses the gauss-jordan sequential algorithm from Grama (Algorithm 8.4) to compute the correct result, then compares the results to 10 decimal places. The reason we choose `10` decimals is that we consider that being enough accuracy whilst still having some spare room in case of floating point precision rounding errors were to occur. 
+* `-v` controlls whether or not to perform verification of the computed result. This uses the gauss-jordan sequential algorithm from Grama (Algorithm 8.4) to compute the correct result, then compares the results to 10 decimal places. The reason we choose `10` decimals is that we consider that being enough accuracy whilst still having some spare room in case of floating point precision rounding errors were to occur. Defaults to `0`.
 
     * `-v 1` means to compute verification and `-v 0` is not to. 
     * The verification only compares the resulting `y` vector. 
