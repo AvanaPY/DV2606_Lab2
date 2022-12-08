@@ -5,10 +5,10 @@ CUDA=/usr/local/cuda-11.8/bin/nvcc
 CUDAUSRBIN=/usr/bin/nvcc
 	
 compile_cuda:
-	@$(CUDAUSRBIN) -o gaussjordancuda.a gaussjordancuda.cu
-	@$(CUDAUSRBIN) -o oddevensortcu.a oddevensort.cu
-	@$(CUDAUSRBIN) -o oddevensortcuda_one_block_block.a oddevensortcuda_one_block_block.cu
-	@$(CUDAUSRBIN) -o oddevensortcuda_one_block_stride.a oddevensortcuda_one_block_stride.cu
+	@$(CUDA) -o gaussjordancuda.a gaussjordancuda.cu
+	@$(CUDA) -o oddevensortcu.a oddevensort.cu
+	@$(CUDA) -o oddevensortcuda_one_block_block.a oddevensortcuda_one_block_block.cu
+	@$(CUDA) -o oddevensortcuda_one_block_stride.a oddevensortcuda_one_block_stride.cu
 
 compile_c:
 	@$(GCC) $(CFLAGS) -o gaussjordancpp.a gaussjordanseq.c
@@ -19,6 +19,7 @@ compile_c:
 
 clean:
 	@rm -rf *.a
+	@rm -rf assignment assignment.zip
 
 zip:
 	@rm -rf assignment

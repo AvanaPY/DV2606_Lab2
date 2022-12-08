@@ -11,8 +11,9 @@
 #include <chrono>
 #include <math.h>
 
-#define MAXNUM 65564
-#define MAX_THREADS_PER_BLOCK 1024
+#define MAXNUM 65536 
+#define THREADS_PER_BLOCK 1024
+#define BLOCKS 32
 
 void print_array_status(int* v, int vsize);
 void print_sort_status(int* v, int vsize);
@@ -23,12 +24,13 @@ void odd_even_sort(int* v, int vsize);
     This is our kernel function, it computes one iteration
     of the odd-even sorting algorithm
 */
-__global__ void vector_odd_even_sort(int* cuda_v, int vsize, int i, int BLOCKS, int BLOCK_SIZE)
+__global__ void vector_odd_even_sort(int* cuda_v, int vsize, int i)
 {
     int j, tmp;
-
+    int thread_offset = (blockIdx.x * blockDim.x + threadIdx.x) * 2;
+    int stride_offset = BLOCKS * THREADS_PER_BLOCK * 2;
     /* Compute which pairs this thread shall sort */
-    for(j = i % 2 + (blockIdx.x * blockDim.x + threadIdx.x) * 2; j < vsize - 1; j += BLOCKS * BLOCK_SIZE * 2){
+    for(j = i % 2 + thread_offset; j < vsize - 1; j += stride_offset){
         if(cuda_v[j] > cuda_v[j + 1])
         {
             tmp = cuda_v[j];
@@ -40,15 +42,12 @@ __global__ void vector_odd_even_sort(int* cuda_v, int vsize, int i, int BLOCKS, 
 
 int main(void)
 {
-    constexpr unsigned int size = 2<<10;
+    constexpr unsigned int size = 2<<19;
     int v[size];
     init_array(v, size);
 
     odd_even_sort(v, size);
-    
     print_sort_status(v, size);
-    // print_array_status(v, size);
-    cudaDeviceSynchronize();
     return 0;
 }
 
@@ -65,18 +64,15 @@ void odd_even_sort(int* v, int vsize)
 
     // Sort
 
-    /* Compute how many blocks we have to use */
-    int THREADS_PER_BLOCK = 512;
-    int BLOCKS = 32;
-
     /* 
         This is our outer loop in the odd-even sorting algorithm
         It synchronises the GPU blocks which are distributed 
         to compute the sorting of one iteration of the odd-even sorting algorithm
     */
     for(int i = 1; i <= vsize; i++)
-        vector_odd_even_sort<<<BLOCKS, MAX_THREADS_PER_BLOCK>>>(cuda_v, vsize, i, BLOCKS, THREADS_PER_BLOCK);
-
+        vector_odd_even_sort<<<BLOCKS, THREADS_PER_BLOCK>>>(cuda_v, vsize, i);
+    cudaDeviceSynchronize();
+    
     // Copy back to host memory
     cudaMemcpy(v, cuda_v, sizeof(int) * vsize, cudaMemcpyDeviceToHost);
 

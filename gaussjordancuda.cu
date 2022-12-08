@@ -13,8 +13,8 @@
 #include <time.h>
 #include <assert.h>
 
+#define __PROFILE__
 #define MAX_SIZE 4096
-int MAX_BLOCK_SIZE;
 
 typedef double matrix[MAX_SIZE][MAX_SIZE];
 
@@ -22,6 +22,9 @@ int	N;		/* matrix size		*/
 int	maxnum;		/* max number of element*/
 char* Init;		/* matrix init type	*/
 int	PRINT;		/* print switch		*/
+int MAX_BLOCK_SIZE; /*  Max dimensional size of block, 
+                        i.e each block is 
+                        MAX_BLOCK_SIZE * MAX_BLOCK_SIZE threads*/
 matrix	A;		/* matrix A		*/
 double	b[MAX_SIZE];	/* vector b             */
 double	y[MAX_SIZE];	/* vector y             */
@@ -44,33 +47,63 @@ int
 main(int argc, char** argv)
 {
     printf("Gauss Jordan GPU\n");
-    clock_t timestart, timeend;
+
+#ifdef __PROFILE__
+    clock_t GLOBAL_START, timestart, timeend;
+    GLOBAL_START = clock();
+    timestart = clock();
+    double d;
+
+#endif
 
     Init_Default();		/* Init default values	*/
     Read_Options(argc, argv);	/* Read arguments	*/
     Init_Matrix();		/* Init the matrix	*/
 
-    /* Prepare verification */
-    memcpy(verify_A, A, sizeof(double) * MAX_SIZE * MAX_SIZE);
-    memcpy(verify_b, b, sizeof(double) * MAX_SIZE);
-    memcpy(verify_y, y, sizeof(double) * MAX_SIZE);
-
+#ifdef __PROFILE__
+    timeend = clock();
+    d = (double)(timeend - timestart) / CLOCKS_PER_SEC;
+    printf("Init default: %.3f\n", d);
     timestart = clock();
+#endif
+
+    /* Prepare verification */
+    if(VERIFY == 1)
+    {
+        memcpy(verify_A, A, sizeof(double) * MAX_SIZE * MAX_SIZE);
+        memcpy(verify_b, b, sizeof(double) * MAX_SIZE);
+        memcpy(verify_y, y, sizeof(double) * MAX_SIZE);
+    }
+
+#ifdef __PROFILE__
+    timeend = clock();
+    d = (double)(timeend - timestart) / CLOCKS_PER_SEC;
+    printf("Verify default: %.3f\n", d);
+    timestart = clock();
+#endif
+
     work();
     cudaDeviceSynchronize();
+
+#ifdef  __PROFILE__
     timeend = clock();
-    printf("Seconds used for computing: %f\n", (double)(timeend - timestart) / CLOCKS_PER_SEC);
+    printf("Total seconds for work(): %f\n", (double)(timeend - timestart) / CLOCKS_PER_SEC);
+    timestart = clock();
+#endif
     
     if (PRINT == 1)
         Print_Matrix();
 
     if(VERIFY == 1)
-    {
-        timestart = clock();
         verify_result();
-        timeend = clock();
-        printf("Seconds used for verification: %f\n", (double)(timeend - timestart) / CLOCKS_PER_SEC);
-    }
+        
+#ifdef __PROFILE__
+    timeend = clock();
+    d = (double)(timeend - timestart) / CLOCKS_PER_SEC;
+    printf("Verify: %.3f\n", d);
+    d = (double)(timeend - GLOBAL_START) / CLOCKS_PER_SEC;
+    printf("Program global time: %.3f\n", d);
+#endif
 }
 
 __global__ void kernel_normalize_row(double* cuda_A, double* cuda_B, double* cuda_Y, int N, int k)
@@ -114,28 +147,43 @@ __global__ void kernel_eval(double* cuda_A, double* cuda_B, double* cuda_Y, int 
         cuda_A[index * N + k] = 0.0;
     } 
 }
-__global__ void kernel_gj_step2(double* cuda_A, double* cuda_B, double* cuda_Y, int N, int k)
-{
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
-    if(index < k)
-    {
-        cuda_Y[index] -= cuda_A[index * N + k] * cuda_Y[k];
-        cuda_A[index * N + k] = 0.0;
-    }
-}
 
 void
 work(void)
 {
     /* Allocate and copy data to GPU */
+#ifdef __PROFILE__
+    printf("Profiling work():\n");
+    clock_t start, end;
+    double diff, tot = 0;
+    start = clock();
+#endif
+
     double *cuda_A, *cuda_B, *cuda_Y;
     cudaMalloc((void**)&cuda_A, sizeof(double) * N * N);
     cudaMalloc((void**)&cuda_B, sizeof(double) * N);
     cudaMalloc((void**)&cuda_Y, sizeof(double) * N);
 
+#ifdef __PROFILE__
+    end = clock();
+    diff = (double)(end - start) / CLOCKS_PER_SEC;
+    tot += diff;
+    printf("\tcudaMalloc:  %.3fs\n", diff);
+
+    start = clock();
+#endif
+
     for(int k = 0; k < N; k++)
         cudaMemcpy(cuda_A + N * k, A[k], sizeof(double) * N, cudaMemcpyHostToDevice);
     cudaMemcpy(cuda_B, b, sizeof(double) * N, cudaMemcpyHostToDevice);
+
+    
+#ifdef __PROFILE__
+    end = clock();
+    diff = (double)(end - start) / CLOCKS_PER_SEC;
+    tot += diff;
+    printf("\tcudaMemcpy:  %.3fs\n", diff);
+#endif
 
     /* GJ elimination */
     int block_size = MAX_BLOCK_SIZE * MAX_BLOCK_SIZE;
@@ -150,9 +198,10 @@ work(void)
         (int)ceil((float)N/(float)blockDims.y)
     );
 
-    clock_t start, end;
-
+#ifdef __PROFILE__
     start = clock();
+#endif
+
     int k;
     for(k = 0; k < N; k++)
     {
@@ -167,9 +216,15 @@ work(void)
         kernel_eval<<<BLOCKS, block_size>>>(cuda_A, cuda_B, cuda_Y, N, k);
     }
     cudaDeviceSynchronize();
+    
+#ifdef __PROFILE__
     end = clock();
-    double difference = (double)(end - start) / CLOCKS_PER_SEC;
-    printf("Total raw computing time: %f\n", difference);
+    diff = (double)(end - start) / CLOCKS_PER_SEC;
+    tot += diff;
+    printf("\tGaussJordan: %.3fs\n", diff);
+
+    start = clock();
+#endif
 
     /* Copy from GPU to RAM */
 
@@ -178,16 +233,20 @@ work(void)
         A's final state is predictable as it's just a matrix of 0s with a diagonal of 1s, and the result of B is not of interest.
         Skipping copying A and B improves performance slightly.
     */ 
-
-    // for(int k = 0; k < N; k++)
-    //     cudaMemcpy(A[k], cuda_A + N * k, sizeof(double) * N, cudaMemcpyDeviceToHost);
-    // cudaMemcpy(b, cuda_B, sizeof(double) * N, cudaMemcpyDeviceToHost);
     cudaMemcpy(y, cuda_Y, sizeof(double) * N, cudaMemcpyDeviceToHost);
 
-    /* Print if we got any cool cuda errors */
+#ifdef __PROFILE__
+    end = clock();
+    diff = (double)(end - start) / CLOCKS_PER_SEC;
+    tot += diff;
+    printf("\tcudaMemcpy:  %.3fs\n", diff);
 
+    start = clock();
     cudaError_t e = cudaGetLastError();
     const char* e_s = cudaGetErrorString(e);
+    printf("\tTotal time:  %.3f\n\tExiting on error: %s\n", tot, e_s);
+#endif
+    /* Print if we got any cool cuda errors */
 
     /* Free GPU memory; cuda is freeeeeeeeee~~~~~~~~ */
     cudaFree(cuda_A);
@@ -411,6 +470,11 @@ void verify_result()
     int decimals = 10;
     for(int i = 0; i < N; i++)
     {
+        /*  We do not need to verify the values of A and B
+            because when we return from the CUDA we do not 
+            copy the values as we are not interested in them
+            however here is some code that would verify the results.
+            Happy CUDA.*/
         // for(int j = 0; j < N; j++)
         //     assert(_round_to_decimals(verify_A[i][j], decimals) == _round_to_decimals(A[i][j], decimals) && "verify_A not equal to A");
         // assert(_round_to_decimals(verify_b[i], decimals) == _round_to_decimals(b[i], decimals) && "verify_b not equal to b");
