@@ -24,7 +24,7 @@ int	N;		/* matrix size		*/
 int	maxnum;		/* max number of element*/
 char* Init;		/* matrix init type	*/
 int	PRINT;		/* print switch		*/
-int MAX_BLOCK_SIZE; /*  Max dimensional size of block, 
+int BLOCK_DIM_SZ; /*  Max dimensional size of block, 
                         i.e each block is 
                         MAX_BLOCK_SIZE * MAX_BLOCK_SIZE threads*/
 matrix	A;		/* matrix A		*/
@@ -108,7 +108,7 @@ main(int argc, char** argv)
 #endif
 }
 
-__global__ void kernel_normalize_row(double* cuda_A, double* cuda_B, double* cuda_Y, int N, int k)
+__global__ void kernel_normalise_row(double* cuda_A, double* cuda_B, double* cuda_Y, int N, int k)
 {
     int index = k + 1 + blockIdx.x * blockDim.x + threadIdx.x;
     if(index < N)
@@ -188,12 +188,12 @@ work(void)
 #endif
 
     /* GJ elimination */
-    int block_size = MAX_BLOCK_SIZE * MAX_BLOCK_SIZE;
+    int block_size = BLOCK_DIM_SZ * BLOCK_DIM_SZ;
     int BLOCKS = max(1, N / block_size);
     
     dim3 blockDims(
-        MAX_BLOCK_SIZE, 
-        MAX_BLOCK_SIZE
+        BLOCK_DIM_SZ, 
+        BLOCK_DIM_SZ
     );
     dim3 gridDims(
         (int)ceil((float)N/(float)blockDims.x),
@@ -208,7 +208,7 @@ work(void)
     for(k = 0; k < N; k++)
     {
         /* Normalize */
-        kernel_normalize_row<<<BLOCKS, block_size>>>(cuda_A, cuda_B, cuda_Y, N, k);
+        kernel_normalise_row<<<BLOCKS, block_size>>>(cuda_A, cuda_B, cuda_Y, N, k);
         kernel_norm_pivot<<<1, 1>>>(cuda_A, cuda_B, cuda_Y, N, k);
         
         /* Standard elimination and gauss-jordan thingies at the same time oh my god */
@@ -262,7 +262,7 @@ Init_Matrix()
     int i, j;
 
     printf("\nsize       = %dx%d", N, N);
-    printf("\nBlock size = <%d,%d>", MAX_BLOCK_SIZE, MAX_BLOCK_SIZE);
+    printf("\nBlock size = <%d,%d>", BLOCK_DIM_SZ, BLOCK_DIM_SZ);
     printf("\nmaxnum     = %d", maxnum);
     printf("\nInit	   = %s", Init);
     printf("\nInitializing matrix...");
@@ -333,7 +333,7 @@ Init_Default()
     PRINT = 0;
     VERIFY = 0;
 
-    MAX_BLOCK_SIZE = 32;
+    BLOCK_DIM_SZ = 32;
 }
 
 int
@@ -383,7 +383,7 @@ Read_Options(int argc, char** argv)
                 break;
             case 't':
                 --argc;
-                MAX_BLOCK_SIZE = atoi(*++argv);
+                BLOCK_DIM_SZ = atoi(*++argv);
                 break;
             case 'v':
                 --argc;
