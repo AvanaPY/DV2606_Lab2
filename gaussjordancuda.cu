@@ -15,7 +15,7 @@
 
 /*  If you would like to profile the program
     rename this macro to __PROFILE__ by removing the "z" */
-#define __PROFILE__
+#define __PROFILE__z
 #define MAX_SIZE 4096
 
 typedef double matrix[MAX_SIZE][MAX_SIZE];
@@ -108,20 +108,20 @@ main(int argc, char** argv)
 #endif
 }
 
-__global__ void kernel_normalise_row(double* cuda_A, double* cuda_B, double* cuda_Y, int N, int k)
+__global__ void kernel_normalise_row(double* cuda_A, double* cuda_Y, int N, int k)
 {
     int index = k + 1 + blockIdx.x * blockDim.x + threadIdx.x;
     if(index < N)
         cuda_A[k * N + index] = cuda_A[k * N + index] / cuda_A[k * N + k];
 }
 
-__global__ void kernel_norm_pivot(double* cuda_A, double* cuda_B, double* cuda_Y, int N, int k)
+__global__ void kernel_norm_pivot(double* cuda_A, double* cuda_Y, int N, int k)
 {
-    cuda_Y[k] = cuda_B[k] / cuda_A[k * N + k];
+    cuda_Y[k] = cuda_Y[k] / cuda_A[k * N + k];
     cuda_A[k * N + k] = 1;
 }
 
-__global__ void kernel_elimination(double* cuda_A, double* cuda_B, double* cuda_Y, int N, int k)
+__global__ void kernel_elimination(double* cuda_A, double* cuda_Y, int N, int k)
 {
     int x = k + 1 + blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -134,22 +134,14 @@ __global__ void kernel_elimination(double* cuda_A, double* cuda_B, double* cuda_
         cuda_A[y * N + x] -= cuda_A[y * N + k] * cuda_A[k * N + x];
 }
 
-__global__ void kernel_eval(double* cuda_A, double* cuda_B, double* cuda_Y, int N, int k)
+__global__ void kernel_eval(double* cuda_A, double* cuda_Y, int N, int k)
 {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
-    if(index >= N)
-        return
+    if(index == k || index >= N)
+        return;
 
-    if(index < k)
-    {
-        cuda_Y[index] -= cuda_A[index * N + k] * cuda_Y[k];
-        cuda_A[index * N + k] = 0.0;
-    }
-    else if(k < index)
-    {
-        cuda_B[index] -= cuda_A[index * N + k] * cuda_Y[k];
-        cuda_A[index * N + k] = 0.0;
-    } 
+    cuda_Y[index] -= cuda_A[index * N + k] * cuda_Y[k];
+    cuda_A[index * N + k] = 0.0;
 }
 
 void
@@ -163,9 +155,8 @@ work(void)
     start = clock();
 #endif
 
-    double *cuda_A, *cuda_B, *cuda_Y;
+    double *cuda_A, *cuda_Y;
     cudaMalloc((void**)&cuda_A, sizeof(double) * N * N);
-    cudaMalloc((void**)&cuda_B, sizeof(double) * N);
     cudaMalloc((void**)&cuda_Y, sizeof(double) * N);
 
 #ifdef __PROFILE__
@@ -179,7 +170,7 @@ work(void)
 
     for(int k = 0; k < N; k++)
         cudaMemcpy(cuda_A + N * k, A[k], sizeof(double) * N, cudaMemcpyHostToDevice);
-    cudaMemcpy(cuda_B, b, sizeof(double) * N, cudaMemcpyHostToDevice);
+    cudaMemcpy(cuda_Y, b, sizeof(double) * N, cudaMemcpyHostToDevice);
     
 #ifdef __PROFILE__
     end = clock();
@@ -209,14 +200,14 @@ work(void)
     for(k = 0; k < N; k++)
     {
         /* Normalize */
-        kernel_normalise_row<<<BLOCKS, block_size>>>(cuda_A, cuda_B, cuda_Y, N, k);
-        kernel_norm_pivot<<<1, 1>>>(cuda_A, cuda_B, cuda_Y, N, k);
+        kernel_normalise_row<<<BLOCKS, block_size>>>(cuda_A, cuda_Y, N, k);
+        kernel_norm_pivot<<<1, 1>>>(cuda_A, cuda_Y, N, k);
         
-        /* Standard elimination and gauss-jordan thingies at the same time oh my god */
-        kernel_elimination<<<gridDims, blockDims>>>(cuda_A, cuda_B, cuda_Y, N, k);
+        // /* Standard elimination and gauss-jordan thingies at the same time oh my god */
+        kernel_elimination<<<gridDims, blockDims>>>(cuda_A, cuda_Y, N, k);
         
-        /* Y evaluation */
-        kernel_eval<<<BLOCKS, block_size>>>(cuda_A, cuda_B, cuda_Y, N, k);
+        // /* Y evaluation */
+        kernel_eval<<<BLOCKS, block_size>>>(cuda_A, cuda_Y, N, k);
     }
     cudaDeviceSynchronize();
     
@@ -232,11 +223,16 @@ work(void)
     /* Copy from GPU to RAM */
 
     /* 
-        Copying A and B back to the Host is optional. We are not necessarily interested in A and B, but only the vector Y.
-        A's final state is predictable as it's just a matrix of 0s with a diagonal of 1s, and the result of B is not of interest.
-        Skipping copying A and B improves performance slightly.
-    */ 
-    cudaMemcpy(y, cuda_Y, sizeof(double) * N, cudaMemcpyDeviceToHost);
+        Copying A back to the Host is optional. We are not necessarily interested in A, but only the vector Y.
+        A's final state is predictable as it's just a matrix of 0s with a diagonal of 1s.
+        Skipping copying A improves performance slightly.
+    */     
+    
+#ifdef __PROFILE__
+    for(int k = 0; k < N; k++)
+        cudaMemcpy(A[k], cuda_A + N * k, sizeof(double) * N, cudaMemcpyDeviceToHost);
+#endif
+        cudaMemcpy(y, cuda_Y, sizeof(double) * N, cudaMemcpyDeviceToHost);
 
 #ifdef __PROFILE__
     end = clock();
@@ -253,7 +249,6 @@ work(void)
 
     /* Free GPU memory; cuda is freeeeeeeeee~~~~~~~~ */
     cudaFree(cuda_A);
-    cudaFree(cuda_B);
     cudaFree(cuda_Y);
 }
 
