@@ -15,7 +15,7 @@
 
 /*  If you would like to profile the program
     rename this macro to __PROFILE__ by removing the "z" */
-#define __PROFILE__z
+#define __PROFILE__
 #define MAX_SIZE 4096
 
 typedef double matrix[MAX_SIZE][MAX_SIZE];
@@ -27,7 +27,7 @@ int	PRINT;		/* print switch		*/
 int BLOCK_DIM_SZ; /*  Max dimensional size of block, 
                         i.e each block is 
                         MAX_BLOCK_SIZE * MAX_BLOCK_SIZE threads*/
-matrix	A;		/* matrix A		*/
+matrix	A;		        /* matrix A		*/
 double	b[MAX_SIZE];	/* vector b             */
 double	y[MAX_SIZE];	/* vector y             */
 
@@ -112,9 +112,7 @@ __global__ void kernel_normalise_row(double* cuda_A, double* cuda_B, double* cud
 {
     int index = k + 1 + blockIdx.x * blockDim.x + threadIdx.x;
     if(index < N)
-    {
         cuda_A[k * N + index] = cuda_A[k * N + index] / cuda_A[k * N + k];
-    }
 }
 
 __global__ void kernel_norm_pivot(double* cuda_A, double* cuda_B, double* cuda_Y, int N, int k)
@@ -128,22 +126,26 @@ __global__ void kernel_elimination(double* cuda_A, double* cuda_B, double* cuda_
     int x = k + 1 + blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
+    if(y >= N || x >= N)
+        return;
+
     // Boundary guard
-    if(k + 1 <= y && (y < N) && (x < N))
-        cuda_A[y * N + x] -= cuda_A[y * N + k] * cuda_A[k * N + x];
-    else if(y < k && (y < k) && (x < N))
+    if(y != k)
         cuda_A[y * N + x] -= cuda_A[y * N + k] * cuda_A[k * N + x];
 }
 
 __global__ void kernel_eval(double* cuda_A, double* cuda_B, double* cuda_Y, int N, int k)
 {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
+    if(index >= N)
+        return
+
     if(index < k)
     {
         cuda_Y[index] -= cuda_A[index * N + k] * cuda_Y[k];
         cuda_A[index * N + k] = 0.0;
     }
-    else if(k < index && index < N)
+    else if(k < index)
     {
         cuda_B[index] -= cuda_A[index * N + k] * cuda_Y[k];
         cuda_A[index * N + k] = 0.0;
@@ -178,7 +180,6 @@ work(void)
     for(int k = 0; k < N; k++)
         cudaMemcpy(cuda_A + N * k, A[k], sizeof(double) * N, cudaMemcpyHostToDevice);
     cudaMemcpy(cuda_B, b, sizeof(double) * N, cudaMemcpyHostToDevice);
-
     
 #ifdef __PROFILE__
     end = clock();
@@ -214,7 +215,7 @@ work(void)
         /* Standard elimination and gauss-jordan thingies at the same time oh my god */
         kernel_elimination<<<gridDims, blockDims>>>(cuda_A, cuda_B, cuda_Y, N, k);
         
-        /* B and Y evaluation at the same time oh my god */
+        /* Y evaluation */
         kernel_eval<<<BLOCKS, block_size>>>(cuda_A, cuda_B, cuda_Y, N, k);
     }
     cudaDeviceSynchronize();

@@ -12,7 +12,7 @@
 #include <math.h>
 
 #define MAXNUM 65536 
-#define THREADS_PER_BLOCK 1024
+#define THREADS_PER_BLOCK 512
 #define BLOCKS 32
 
 void print_array_status(int* v, int vsize);
